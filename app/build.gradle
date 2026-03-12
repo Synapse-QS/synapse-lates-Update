@@ -35,7 +35,7 @@ def getGitCommitCount = { ->
 
 android {
     namespace = "com.synapse.social.studioasinc"
-    compileSdk = 36
+    compileSdk 36
     buildToolsVersion = "36.0.0"
 
     signingConfigs {
@@ -58,7 +58,7 @@ android {
     defaultConfig {
         applicationId = "com.synapse.social.studioasinc"
         minSdk = 26
-        targetSdk = 34 // Updated to Android 14 for security and Play Store compliance
+        targetSdk 35
         versionCode = 1
         versionName = project.findProperty("projectVersion")
         multiDexEnabled = true
@@ -260,7 +260,9 @@ dependencies {
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.1.2")
 
     // Firebase Vertex AI for Gemini
-    implementation("com.google.firebase:firebase-vertexai:16.0.2")
+    implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
+    implementation("com.google.firebase:firebase-messaging")
+    implementation("com.google.firebase:firebase-vertexai")
     implementation("com.google.genai:google-genai:1.29.0")
 
     // SQLDelight Driver
@@ -336,7 +338,7 @@ dependencies {
     implementation 'com.google.code.gson:gson:2.13.1'
 
     // UI Components (Non-AndroidX)
-    implementation 'com.onesignal:OneSignal:[5.1.6, 5.1.99]'
+    implementation 'com.onesignal:OneSignal:5.7.1'
 
     // Local AARs
 

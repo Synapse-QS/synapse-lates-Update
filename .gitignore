@@ -51,7 +51,7 @@ jacoco*.exec
 *.jks
 *.keystore
 # Firebase Configuration (CRITICAL for security)
-google-services.json
+# google-services.json (Removed from exclusion as requested)
 # Generated Room Database Schemas (often kept for migration, but excluded by default)
 # Remove the following lines if you explicitly track schemas for Room migrations:
 /app/schemas/

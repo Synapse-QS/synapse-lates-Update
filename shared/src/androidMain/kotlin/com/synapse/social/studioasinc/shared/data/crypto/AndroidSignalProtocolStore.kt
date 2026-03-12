@@ -65,7 +65,7 @@ class AndroidSignalProtocolStore(context: Context) : SignalProtocolStore {
     }
     
     fun hasIdentity(): Boolean {
-        return prefs.contains("identity_key_pair")
+        return prefs.contains("identity_key_pair") && prefs.contains("local_registration_id")
     }
 
     fun getLastKeyRotation(): Long {

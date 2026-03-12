@@ -12,6 +12,8 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Clock
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -22,8 +24,8 @@ class SupabasePresenceRepository(
     private var heartbeatJob: Job? = null
     private val presenceChannel by lazy { client.realtime.channel("presence") }
     
-    override suspend fun updatePresence(isOnline: Boolean): Result<Unit> = runCatching {
-        val userId = client.auth.currentUserOrNull()?.id ?: return Result.failure(Exception("Not authenticated"))
+    override suspend fun updatePresence(isOnline: Boolean, currentChatId: String?): Result<Unit> = runCatching {
+        val userId = client.auth.currentUserOrNull()?.id?.toString() ?: return Result.failure(Exception("Not authenticated"))
         
         withContext(Dispatchers.IO) {
             client.postgrest.from("user_presence").upsert(
@@ -31,52 +33,120 @@ class SupabasePresenceRepository(
                     put("user_id", userId)
                     put("is_online", isOnline)
                     put("last_seen", Clock.System.now().toString())
+                    put("activity_status", if (isOnline) "online" else "offline")
+                    if (currentChatId != null) {
+                        put("current_chat_id", currentChatId)
+                    }
                 }
             )
+            Napier.d("Presence updated: userId=$userId, isOnline=$isOnline")
         }
     }
     
     override suspend fun startPresenceTracking() {
-        val userId = client.auth.currentUserOrNull()?.id ?: return
+        val userId = client.auth.currentUserOrNull()?.id?.toString() ?: run {
+            Napier.e("Cannot start presence tracking: User not authenticated")
+            return
+        }
         
-        presenceChannel.subscribe(blockUntilSubscribed = true)
-        presenceChannel.track(buildJsonObject {
-            put("user_id", userId)
-            put("online", true)
-        })
+        Napier.d("Starting presence tracking for user: $userId")
         
+        // Initial presence update
+        updatePresence(true).onFailure { 
+            Napier.e("Failed initial presence update", it)
+        }
+        
+        // Subscribe to realtime channel
+        try {
+            presenceChannel.subscribe(blockUntilSubscribed = true)
+            presenceChannel.track(buildJsonObject {
+                put("user_id", userId)
+                put("online", true)
+            })
+            Napier.d("Subscribed to presence channel")
+        } catch (e: Exception) {
+            Napier.e("Failed to subscribe to presence channel", e)
+        }
+        
+        // Start heartbeat
+        heartbeatJob?.cancel()
         heartbeatJob = CoroutineScope(Dispatchers.Default).launch {
             while (isActive) {
-                updatePresence(true)
                 delay(30_000) // 30s heartbeat
+                updatePresence(true).onFailure { 
+                    Napier.e("Heartbeat update failed", it)
+                }
             }
         }
+        Napier.d("Presence heartbeat started")
     }
     
     override suspend fun stopPresenceTracking() {
+        Napier.d("Stopping presence tracking")
         heartbeatJob?.cancel()
-        updatePresence(false)
-        presenceChannel.unsubscribe()
+        updatePresence(false).onFailure {
+            Napier.e("Failed to update presence on stop", it)
+        }
+        try {
+            presenceChannel.unsubscribe()
+        } catch (e: Exception) {
+            Napier.e("Failed to unsubscribe from presence channel", e)
+        }
     }
     
     override fun observeUserPresence(userId: String): Flow<Boolean> {
-        // TODO: Implement with Supabase 3.x Realtime Presence API
-        // For now, poll the database
         return kotlinx.coroutines.flow.flow {
             while (true) {
-                val isOnline = runCatching {
+                val isActive = runCatching {
                     val response = client.postgrest.from("user_presence")
                         .select {
                             filter {
                                 eq("user_id", userId)
-                                eq("is_online", true)
                             }
                         }
-                    response.data.isNotEmpty()
+                        .decodeSingle<UserPresenceDto>()
+                    
+                    // User is active if online and last_seen within 5 minutes
+                    response.isOnline && isWithinActiveWindow(response.lastSeen)
                 }.getOrDefault(false)
-                emit(isOnline)
-                delay(5000) // Poll every 5 seconds
+                emit(isActive)
+                delay(10_000) // Poll every 10 seconds
             }
         }
     }
+    
+    override suspend fun isUserInChat(userId: String, chatId: String): Boolean {
+        return runCatching {
+            val response = client.postgrest.from("user_presence")
+                .select {
+                    filter {
+                        eq("user_id", userId)
+                    }
+                }
+                .decodeSingle<UserPresenceDto>()
+            
+            response.isOnline && 
+            response.currentChatId == chatId && 
+            isWithinActiveWindow(response.lastSeen)
+        }.getOrDefault(false)
+    }
+    
+    private fun isWithinActiveWindow(lastSeen: String?): Boolean {
+        if (lastSeen == null) return false
+        return try {
+            val lastSeenInstant = kotlinx.datetime.Instant.parse(lastSeen)
+            val now = Clock.System.now()
+            val diff = now - lastSeenInstant
+            diff.inWholeMinutes < 5
+        } catch (e: Exception) {
+            false
+        }
+    }
 }
+
+@Serializable
+private data class UserPresenceDto(
+    @SerialName("is_online") val isOnline: Boolean,
+    @SerialName("last_seen") val lastSeen: String?,
+    @SerialName("current_chat_id") val currentChatId: String? = null
+)

@@ -15,6 +15,8 @@ import android.util.Log
 import java.net.UnknownHostException
 import java.net.SocketTimeoutException
 import java.io.IOException
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.filter.PostgrestFilterBuilder
 
 
 
@@ -394,6 +396,21 @@ class SupabaseAuthenticationService : com.synapse.social.studioasinc.data.remote
                         OneSignal.login(userId)
                         debugLog("✅ OneSignal login successful with user ID: $userId")
                         android.util.Log.d("OneSignal", "✅ Logged in with user: $userId")
+                        
+                        // Sync subscription ID if available
+                        val subId = OneSignal.User.pushSubscription.id
+                        if (subId != null) {
+                            try {
+                                client.postgrest["users"].update(
+                                    mapOf("one_signal_player_id" to subId)
+                                ) {
+                                    filter { eq("uid", userId) }
+                                }
+                                debugLog("✅ Synced OneSignal subscription ID: $subId")
+                            } catch (e: Exception) {
+                                debugLog("❌ Failed to sync OneSignal subscription ID: ${e.message}")
+                            }
+                        }
                     } catch (e: Exception) {
                         debugLog("❌ OneSignal login failed: ${e.message}")
                         android.util.Log.e("OneSignal", "❌ Login failed", e)
@@ -468,6 +485,21 @@ class SupabaseAuthenticationService : com.synapse.social.studioasinc.data.remote
                         OneSignal.login(user.id)
                         debugLog("✅ OneSignal login successful with user ID: ${user.id}")
                         android.util.Log.d("OneSignal", "✅ Logged in with user: ${user.id}")
+                        
+                        // Sync subscription ID if available
+                        val subId = OneSignal.User.pushSubscription.id
+                        if (subId != null) {
+                            try {
+                                client.postgrest["users"].update(
+                                    mapOf("one_signal_player_id" to subId)
+                                ) {
+                                    filter { eq("uid", user.id) }
+                                }
+                                debugLog("✅ Synced OneSignal subscription ID: $subId")
+                            } catch (e: Exception) {
+                                debugLog("❌ Failed to sync OneSignal subscription ID: ${e.message}")
+                            }
+                        }
                     } catch (e: Exception) {
                         debugLog("❌ OneSignal login failed: ${e.message}")
                         android.util.Log.e("OneSignal", "❌ Login failed", e)

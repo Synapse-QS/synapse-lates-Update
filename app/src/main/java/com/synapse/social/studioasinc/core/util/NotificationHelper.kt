@@ -10,6 +10,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.time.LocalTime
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 
 object NotificationHelper {
 
@@ -162,14 +165,24 @@ object NotificationHelper {
         data: Map<String, String>? = null
     ) {
         try {
-            val request = mapOf(
-                "recipient_id" to recipientUid,
-                "message" to message,
-                "type" to notificationType,
-                "headings" to mapOf("en" to NotificationConfig.getTitleForNotificationType(notificationType)),
-                "sender_id" to senderUid,
-                "data" to data
-            )
+            val request = buildJsonObject {
+                put("recipient_id", recipientUid)
+                put("message", message)
+                put("type", notificationType)
+                putJsonObject("headings") {
+                    put("en", NotificationConfig.getTitleForNotificationType(notificationType))
+                }
+                if (senderUid != null) {
+                    put("sender_id", senderUid)
+                }
+                if (data != null) {
+                    putJsonObject("data") {
+                        data.forEach { (key, value) ->
+                            put(key, value)
+                        }
+                    }
+                }
+            }
 
             Log.d(TAG, "Sending notification: recipient=$recipientUid, type=$notificationType")
 
@@ -237,5 +250,47 @@ object NotificationHelper {
             NotificationConfig.NOTIFICATION_TYPE_NEW_MESSAGE, 
             mapOf("chat_id" to chatId)
         )
+    }
+
+    @JvmStatic
+    fun showProgressNotification(context: android.content.Context, notificationId: Int, progress: Int, title: String) {
+        val notificationManager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+        // Ensure channel exists
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel(
+                "upload_channel",
+                "Media Uploads",
+                android.app.NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows progress for media uploads"
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val builder = androidx.core.app.NotificationCompat.Builder(context, "upload_channel")
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setContentTitle(title)
+            .setOngoing(progress < 100)
+            .setOnlyAlertOnce(true)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+
+        if (progress < 100) {
+            builder.setProgress(100, progress, false)
+                .setContentText("$progress%")
+        } else {
+            builder.setProgress(0, 0, false)
+                .setContentText("Upload complete")
+                // Auto cancel when complete
+                .setAutoCancel(true)
+        }
+
+        // Note: For Android 13+ (API 33), POST_NOTIFICATIONS permission is required.
+        // We assume it is already handled by the app for other notifications.
+        try {
+            notificationManager.notify(notificationId, builder.build())
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to show progress notification", e)
+        }
     }
 }

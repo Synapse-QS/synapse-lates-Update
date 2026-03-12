@@ -26,14 +26,25 @@ class AndroidSignalProtocolManager(context: Context) : SignalProtocolManager {
     private val DEVICE_ID = 1
 
     override suspend fun generateIdentityAndKeys(): SignalIdentityKeys {
-        Napier.d("E2EE_INIT: Generating identity key pair", tag = "E2EE")
-        val identityKeyPair = KeyHelper.generateIdentityKeyPair()
-        val registrationId = KeyHelper.generateRegistrationId(false)
-        val signedPreKey = KeyHelper.generateSignedPreKey(identityKeyPair, 1)
+        val identityKeyPair: IdentityKeyPair
+        val registrationId: Int
 
-        store.storeLocalIdentity(identityKeyPair, registrationId)
+        if (store.hasIdentity()) {
+            // Reuse existing identity — only refresh the signed pre-key
+            Napier.d("E2EE_INIT: Reusing existing identity key pair", tag = "E2EE")
+            identityKeyPair = store.identityKeyPair
+            registrationId = store.getLocalRegistrationId()
+        } else {
+            // Fresh generation
+            Napier.d("E2EE_INIT: Generating new identity key pair", tag = "E2EE")
+            identityKeyPair = KeyHelper.generateIdentityKeyPair()
+            registrationId = KeyHelper.generateRegistrationId(false)
+            store.storeLocalIdentity(identityKeyPair, registrationId)
+        }
+
+        val signedPreKey = KeyHelper.generateSignedPreKey(identityKeyPair, 1)
         store.storeSignedPreKey(signedPreKey.id, signedPreKey)
-        Napier.d("E2EE_INIT: Stored identity and signed pre-key locally", tag = "E2EE")
+        Napier.d("E2EE_INIT: Stored identity and signed pre-key locally (regId: $registrationId)", tag = "E2EE")
 
         return SignalIdentityKeys(
             registrationId = registrationId,

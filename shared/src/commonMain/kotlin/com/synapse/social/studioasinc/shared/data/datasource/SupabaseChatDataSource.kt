@@ -42,6 +42,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.putJsonObject
 import kotlin.coroutines.cancellation.CancellationException
 
 class SupabaseChatDataSource(private val client: SupabaseClientLib = SupabaseClient.client) {
@@ -190,13 +191,15 @@ class SupabaseChatDataSource(private val client: SupabaseClientLib = SupabaseCli
 
     suspend fun sendMessageNotification(recipientId: String, senderId: String, message: String, chatId: String) = withContext(Dispatchers.IO) {
         try {
-            client.functions.invoke("send-push-notification", mapOf(
-                "recipient_id" to recipientId,
-                "sender_id" to senderId,
-                "message" to message,
-                "type" to "NEW_MESSAGE",
-                "data" to mapOf("chat_id" to chatId)
-            ))
+            client.functions.invoke("send-push-notification", buildJsonObject {
+                put("recipient_id", recipientId)
+                put("sender_id", senderId)
+                put("message", message)
+                put("type", "NEW_MESSAGE")
+                putJsonObject("data") {
+                    put("chat_id", chatId)
+                }
+            })
         } catch (e: Exception) {
             Napier.e("Failed to send notification", e)
         }
@@ -472,17 +475,6 @@ class SupabaseChatDataSource(private val client: SupabaseClientLib = SupabaseCli
             client.postgrest.from("user_deleted_messages").insert(deletion)
         }
 
-    suspend fun uploadMedia(chatId: String, fileBytes: ByteArray, fileName: String, contentType: String): String =
-        withContext(Dispatchers.IO) {
-            try {
-                val path = "chat_media/$chatId/$fileName"
-                client.storage.from("chat_attachments").upload(path, fileBytes)
-                client.storage.from("chat_attachments").publicUrl(path)
-            } catch (e: Exception) {
-                Napier.e("Error uploading media", e)
-                throw e
-            }
-        }
 
     suspend fun broadcastTypingStatus(chatId: String, isTyping: Boolean) = 
         withContext(Dispatchers.IO) {

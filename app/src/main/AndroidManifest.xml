@@ -229,6 +229,14 @@
 			android:name="org.apache.http.legacy"
 			android:required="false" />
 
+		<service
+			android:name=".data.remote.services.fcm.SynapseFirebaseMessagingService"
+			android:exported="false">
+			<intent-filter>
+				<action android:name="com.google.firebase.MESSAGING_EVENT" />
+			</intent-filter>
+		</service>
+
 		<!-- Background Deletion Service -->
 		<service
 			android:name=".data.repository.deletion.BackgroundDeletionService"

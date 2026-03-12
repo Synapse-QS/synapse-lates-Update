@@ -10,10 +10,16 @@ import com.synapse.social.studioasinc.shared.domain.model.chat.MessageType
 import com.synapse.social.studioasinc.shared.domain.model.chat.TypingStatus
 import com.synapse.social.studioasinc.shared.domain.repository.ChatRepository
 import com.synapse.social.studioasinc.shared.domain.usecase.chat.*
+
+import com.synapse.social.studioasinc.domain.usecase.reaction.ToggleMessageReactionUseCase
+import com.synapse.social.studioasinc.domain.usecase.reaction.PopulateMessageReactionsUseCase
+import com.synapse.social.studioasinc.domain.model.ReactionType as AppReactionType
+
 import com.synapse.social.studioasinc.shared.domain.usecase.user.GetUserProfileUseCase
 import com.synapse.social.studioasinc.shared.util.TimestampFormatter
 import kotlin.time.Duration.Companion.seconds
 import com.synapse.social.studioasinc.core.util.NotificationHelper
+import com.synapse.social.studioasinc.core.util.UploadProgressManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.Job
@@ -41,7 +47,11 @@ class ChatViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val chatLockManager: com.synapse.social.studioasinc.core.util.ChatLockManager,
     private val generateSmartRepliesUseCase: com.synapse.social.studioasinc.domain.usecase.ai.GenerateSmartRepliesUseCase,
-    private val summarizeChatUseCase: com.synapse.social.studioasinc.domain.usecase.ai.SummarizeChatUseCase
+    private val summarizeChatUseCase: com.synapse.social.studioasinc.domain.usecase.ai.SummarizeChatUseCase,
+    private val uploadProgressManager: UploadProgressManager,
+    private val fileUploader: com.synapse.social.studioasinc.shared.data.FileUploader,
+    private val toggleMessageReactionUseCase: ToggleMessageReactionUseCase,
+    private val populateMessageReactionsUseCase: PopulateMessageReactionsUseCase
 ) : ViewModel() {
 
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
@@ -142,8 +152,11 @@ class ChatViewModel @Inject constructor(
             currentChatId = actualChatId
 
             // Fetch initial messages
+
             getMessagesUseCase(actualChatId).onSuccess { messages ->
-                _messages.value = messages.distinctBy { it.id }.sortedBy { it.createdAt } // oldest first for UI
+                val populated = populateMessageReactionsUseCase(messages)
+                _messages.value = populated.distinctBy { it.id }.sortedBy { it.createdAt } // oldest first for UI
+
                 _isLoading.value = false
             }.onFailure { e ->
                 _error.value = e.message
@@ -381,6 +394,50 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+
+    fun toggleMessageReaction(messageId: String, reactionType: com.synapse.social.studioasinc.shared.domain.model.ReactionType) {
+        viewModelScope.launch {
+            val oldMessage = _messages.value.find { it.id == messageId } ?: return@launch
+            val oldUserReaction = oldMessage.userReaction
+            val oldReactionCounts = oldMessage.reactions.toMutableMap()
+
+            val isSame = oldUserReaction == reactionType
+            val newUserReaction = if (isSame) null else reactionType
+
+            if (oldUserReaction != null) {
+                oldReactionCounts[oldUserReaction] = (oldReactionCounts[oldUserReaction] ?: 0) - 1
+                if (oldReactionCounts[oldUserReaction] == 0) oldReactionCounts.remove(oldUserReaction)
+            }
+            if (!isSame) {
+                oldReactionCounts[reactionType] = (oldReactionCounts[reactionType] ?: 0) + 1
+            }
+
+            // Optimistic update
+            _messages.update { current ->
+                current.map {
+                    if (it.id == messageId) {
+                        it.copy(
+                            userReaction = newUserReaction,
+                            reactions = oldReactionCounts
+                        )
+                    } else it
+                }
+            }
+
+            val appReactionType = AppReactionType.fromString(reactionType.name)
+            val oldAppReaction = oldUserReaction?.let { AppReactionType.fromString(it.name) }
+            toggleMessageReactionUseCase(messageId, appReactionType, oldAppReaction).onFailure { e ->
+                _error.value = "Failed to toggle reaction: ${e.message}"
+                // Revert
+                _messages.update { current ->
+                    current.map {
+                        if (it.id == messageId) oldMessage else it
+                    }
+                }
+            }
+        }
+    }
+
     fun startEditing(message: Message) {
         _editingMessage.value = message
         _inputText.value = message.content
@@ -486,10 +543,26 @@ class ChatViewModel @Inject constructor(
         _disappearingMode.value = mode
     }
 
-    fun uploadAndSendMedia(fileBytes: ByteArray, fileName: String, contentType: String, messageType: String) {
+    fun uploadAndSendMedia(filePath: String, fileName: String, contentType: String, messageType: String) {
         val chatId = currentChatId ?: return
 
         viewModelScope.launch {
+            val fileSize = fileUploader.getFileSize(filePath)
+            val maxVideoSize = 50 * 1024 * 1024L // 50MB
+            val maxImageSize = 10 * 1024 * 1024L // 10MB
+
+            if (messageType == "video" && fileSize > maxVideoSize) {
+                _error.value = "Video file size exceeds 50MB limit"
+                return@launch
+            }
+            if (messageType == "image" && fileSize > maxImageSize) {
+                _error.value = "Image file size exceeds 10MB limit"
+                return@launch
+            }
+
+            val notificationId = kotlin.random.Random.nextInt()
+            uploadProgressManager.showProgress(notificationId, 0, "Uploading media")
+
             // Optimistic update
             val tempId = UUID.randomUUID().toString()
             // Register this temp ID so the realtime handler knows to replace it
@@ -516,9 +589,21 @@ class ChatViewModel @Inject constructor(
 
             uploadMediaUseCase(
                 chatId = chatId,
-                fileBytes = fileBytes,
+                filePath = filePath,
                 fileName = fileName,
-                contentType = contentType
+                contentType = contentType,
+                onProgress = { progress ->
+                    uploadProgressManager.updateProgress(chatId, fileName, progress)
+                    _messages.update { current ->
+                        current.map {
+                            if (it.id == tempId) {
+                                it.copy(content = "Uploading... $progress%")
+                            } else {
+                                it
+                            }
+                        }
+                    }
+                }
             ).onSuccess { mediaUrl ->
                 val finalContent = if (messageType == "image" || messageType == "video") "Media message" else fileName
                 sendMessageUseCase(
@@ -550,6 +635,7 @@ class ChatViewModel @Inject constructor(
                     _messages.update { current -> current.filter { it.id != tempId } }
                 }
             }.onFailure { e ->
+                uploadProgressManager.finishProgress(notificationId, false, "Upload Failed")
                 pendingTempIds.update { it - tempId }
                 _error.value = "Upload failed: ${e.message}"
                 _messages.update { current -> current.filter { it.id != tempId } }
