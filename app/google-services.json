@@ -1,43 +1,45 @@
 {
   "project_info": {
-    "project_number": "123456789012",
-    "project_id": "synapse-social-dummy",
-    "storage_bucket": "synapse-social-dummy.appspot.com"
+    "project_number": "87129316333",
+    "firebase_url": "https://naru-586aa-default-rtdb.firebaseio.com",
+    "project_id": "naru-586aa",
+    "storage_bucket": "naru-586aa.appspot.com"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:123456789012:android:0000000000000000000000",
+        "mobilesdk_app_id": "1:87129316333:android:c9745ad51e43b421b325e4",
         "android_client_info": {
           "package_name": "com.synapse.social.studioasinc"
         }
       },
+      "oauth_client": [
+        {
+          "client_id": "87129316333-hhr1iaija5ib3o1kucooeetml5h05dbv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.synapse.social.studioasinc",
+            "certificate_hash": "15808a30dca07d749dad210de8ae5a5814df2dcf"
+          }
+        },
+        {
+          "client_id": "87129316333-afujpgeg00pba71ju16ej68j6av75800.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
-          "current_key": "dummy-api-key"
+          "current_key": "AIzaSyBEDbR9jrqzPKQ8T3faz_LoQXRDjgdKPGs"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:123456789012:android:0000000000000000000001",
-        "android_client_info": {
-          "package_name": "com.synapse.social.studioasinc.debug"
-        }
-      },
-      "api_key": [
-        {
-          "current_key": "dummy-api-key-debug"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "87129316333-afujpgeg00pba71ju16ej68j6av75800.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
