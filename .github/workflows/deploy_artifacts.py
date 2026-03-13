@@ -3,7 +3,9 @@ import subprocess
 import asyncio
 import logging
 import sys
+import time
 from telethon import TelegramClient
+from telethon.errors import FloodWaitError
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -69,6 +71,20 @@ async def send_file(client, group_id, topic_id, file_path, commit_info, github_a
             reply_to=topic_id
         )
         logger.info("\nFile sent successfully.")
+    except FloodWaitError as e:
+        wait_time = e.seconds
+        logger.warning(f"Rate limited by Telegram. Waiting {wait_time} seconds...")
+        time.sleep(wait_time)
+        # Retry once after waiting
+        await client.send_file(
+            entity=group_id,
+            file=file_path,
+            caption=message,
+            parse_mode='markdown',
+            progress_callback=progress_callback,
+            reply_to=topic_id
+        )
+        logger.info("\nFile sent successfully after rate limit wait.")
     except Exception as e:
         logger.error(f"\nFailed to send file: {e}")
 
@@ -106,6 +122,13 @@ async def main():
 
     client = TelegramClient('bot_session', api_id, api_hash)
     try:
+        await client.start(bot_token=bot_token)
+        await send_file(client, group_id, topic_id, apk_path, commit_info, github_actor)
+    except FloodWaitError as e:
+        wait_time = e.seconds
+        logger.warning(f"Rate limited during client start. Waiting {wait_time} seconds...")
+        time.sleep(wait_time)
+        # Retry client start after waiting
         await client.start(bot_token=bot_token)
         await send_file(client, group_id, topic_id, apk_path, commit_info, github_actor)
     finally:
